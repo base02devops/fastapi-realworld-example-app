@@ -1,21 +1,31 @@
-FROM python:3.9.10-slim
+FROM python:3.9-slim as builder
 
-ENV PYTHONUNBUFFERED 1
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
 
-EXPOSE 8000
+# Install Poetry
+ARG POETRY_VERSION=1.4.2
+RUN pip install "poetry==${POETRY_VERSION}"
+
+# Configure Poetry
+RUN poetry config virtualenvs.create false
+
+# Copy only requirements to cache them in Docker layer
 WORKDIR /app
+COPY pyproject.toml poetry.lock ./
 
+# Install project dependencies
+RUN poetry install --only main --no-interaction --no-ansi
 
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends netcat && \
-    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+# Production stage
+FROM python:3.9-slim
 
-COPY poetry.lock pyproject.toml ./
-RUN pip install poetry==1.1 && \
-    poetry config virtualenvs.in-project true && \
-    poetry install --no-dev
+WORKDIR /app
+COPY --from=builder /usr/local/lib/python3.9/site-packages /usr/local/lib/python3.9/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+COPY . .
 
-COPY . ./
-
-CMD poetry run alembic upgrade head && \
-    poetry run uvicorn --host=0.0.0.0 app.main:app
+CMD ["python", "app.py"]
